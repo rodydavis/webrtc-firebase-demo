@@ -1,54 +1,50 @@
-import './style.css';
+import "./style.css";
 
-import firebase from 'firebase/app';
-import 'firebase/firestore';
+import PocketBase from "pocketbase";
 
-const firebaseConfig = {
-  // your config
-};
+const pb = new PocketBase("http://127.0.0.1:8090");
 
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-const firestore = firebase.firestore();
+const calls = pb.collection("calls");
+const offerCandidates = pb.collection("offer_candidates");
+const answerCandidates = pb.collection("answer_candidates");
+
+const webcamButton = document.getElementById("webcamButton");
+const webcamVideo = document.getElementById("webcamVideo");
+const callButton = document.getElementById("callButton");
+const callInput = document.getElementById("callInput");
+const answerButton = document.getElementById("answerButton");
+const remoteVideo = document.getElementById("remoteVideo");
+const hangupButton = document.getElementById("hangupButton");
+
+await pb.admins.authWithPassword(
+  import.meta.env.VITE_POCKETBASE_ADMIN_USERNAME,
+  import.meta.env.VITE_POCKETBASE_ADMIN_PASSWORD
+);
+const iceServers = await pb.collection("ice_servers").getFullList();
 
 const servers = {
-  iceServers: [
-    {
-      urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'],
-    },
-  ],
+  iceServers: [{ urls: iceServers.map((e) => e.url) }],
   iceCandidatePoolSize: 10,
 };
 
-// Global State
 const pc = new RTCPeerConnection(servers);
 let localStream = null;
 let remoteStream = null;
 
-// HTML elements
-const webcamButton = document.getElementById('webcamButton');
-const webcamVideo = document.getElementById('webcamVideo');
-const callButton = document.getElementById('callButton');
-const callInput = document.getElementById('callInput');
-const answerButton = document.getElementById('answerButton');
-const remoteVideo = document.getElementById('remoteVideo');
-const hangupButton = document.getElementById('hangupButton');
-
-// 1. Setup media sources
-
 webcamButton.onclick = async () => {
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  localStream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true,
+  });
   remoteStream = new MediaStream();
 
-  // Push tracks from local stream to peer connection
   localStream.getTracks().forEach((track) => {
     pc.addTrack(track, localStream);
   });
 
-  // Pull tracks from remote stream, add to video stream
   pc.ontrack = (event) => {
-    event.streams[0].getTracks().forEach((track) => {
+    const stream = event.streams[0];
+    stream.getTracks().forEach((track) => {
       remoteStream.addTrack(track);
     });
   };
@@ -61,21 +57,20 @@ webcamButton.onclick = async () => {
   webcamButton.disabled = true;
 };
 
-// 2. Create an offer
 callButton.onclick = async () => {
-  // Reference Firestore collections for signaling
-  const callDoc = firestore.collection('calls').doc();
-  const offerCandidates = callDoc.collection('offerCandidates');
-  const answerCandidates = callDoc.collection('answerCandidates');
+  const call = await calls.create({});
+  const callId = call.id;
 
-  callInput.value = callDoc.id;
+  callInput.value = callId;
 
-  // Get candidates for caller, save to db
   pc.onicecandidate = (event) => {
-    event.candidate && offerCandidates.add(event.candidate.toJSON());
+    event.candidate &&
+      offerCandidates.create({
+        call_id: callId,
+        data: event.candidate.toJSON(),
+      });
   };
 
-  // Create offer
   const offerDescription = await pc.createOffer();
   await pc.setLocalDescription(offerDescription);
 
@@ -84,45 +79,44 @@ callButton.onclick = async () => {
     type: offerDescription.type,
   };
 
-  await callDoc.set({ offer });
+  await calls.update(callId, { offer });
 
-  // Listen for remote answer
-  callDoc.onSnapshot((snapshot) => {
-    const data = snapshot.data();
+  calls.subscribe(callId, (e) => {
+    const data = e.record;
     if (!pc.currentRemoteDescription && data?.answer) {
       const answerDescription = new RTCSessionDescription(data.answer);
       pc.setRemoteDescription(answerDescription);
     }
   });
 
-  // When answered, add candidate to peer connection
-  answerCandidates.onSnapshot((snapshot) => {
-    snapshot.docChanges().forEach((change) => {
-      if (change.type === 'added') {
-        const candidate = new RTCIceCandidate(change.doc.data());
+  answerCandidates.subscribe("*", (e) => {
+    if (e.action === "create") {
+      if (e.record?.call_id === callId) {
+        const data = e.record.data;
+        const candidate = new RTCIceCandidate(data);
         pc.addIceCandidate(candidate);
       }
-    });
+    }
   });
 
   hangupButton.disabled = false;
 };
 
-// 3. Answer the call with the unique ID
 answerButton.onclick = async () => {
   const callId = callInput.value;
-  const callDoc = firestore.collection('calls').doc(callId);
-  const answerCandidates = callDoc.collection('answerCandidates');
-  const offerCandidates = callDoc.collection('offerCandidates');
+  const call = await calls.getOne(callId);
 
   pc.onicecandidate = (event) => {
-    event.candidate && answerCandidates.add(event.candidate.toJSON());
+    event.candidate &&
+      answerCandidates.create({
+        call_id: call.id,
+        data: event.candidate.toJSON(),
+      });
   };
 
-  const callData = (await callDoc.get()).data();
-
-  const offerDescription = callData.offer;
-  await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
+  const offerDescription = call.offer;
+  const remoteDescription = new RTCSessionDescription(offerDescription);
+  await pc.setRemoteDescription(remoteDescription);
 
   const answerDescription = await pc.createAnswer();
   await pc.setLocalDescription(answerDescription);
@@ -132,15 +126,27 @@ answerButton.onclick = async () => {
     sdp: answerDescription.sdp,
   };
 
-  await callDoc.update({ answer });
+  await calls.update(call.id, { answer });
 
-  offerCandidates.onSnapshot((snapshot) => {
-    snapshot.docChanges().forEach((change) => {
-      console.log(change);
-      if (change.type === 'added') {
-        let data = change.doc.data();
-        pc.addIceCandidate(new RTCIceCandidate(data));
+  offerCandidates.subscribe("*", async (e) => {
+    if (e.record?.call_id === call.id) {
+      if (e.action === "create") {
+        const data = e.record.data;
+        const candidate = new RTCIceCandidate(data);
+        await pc.addIceCandidate(candidate);
+      } else if (e.action === "delete") {
+        await offerCandidates.unsubscribe();
+        window.location.reload();
       }
-    });
+    }
   });
+};
+
+hangupButton.onclick = async () => {
+  const callId = callInput.value;
+  pc.close();
+  await calls.unsubscribe(callId);
+  await calls.delete(callId);
+  await answerCandidates.unsubscribe();
+  window.location.reload();
 };

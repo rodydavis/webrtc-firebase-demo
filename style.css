@@ -1,11 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Syne+Mono&display=swap');
-
 body {
-  font-family: 'Syne Mono', monospace;
+  --text-color: #2c3e50;
+  --video-background-color: #2c3e50;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-align: center;
-  color: #2c3e50;
+  color: var(--text-color);
   margin: 80px 10px;
 }
 
@@ -13,7 +14,7 @@ video {
   width: 40vw;
   height: 30vw;
   margin: 2rem;
-  background: #2c3e50;
+  background: var(--video-background-color);
 }
 
 .videos {
