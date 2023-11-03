@@ -8,7 +8,7 @@ Learn more about WebRTC [here](https://youtu.be/WmR9IMUD_CY).
 
 ## Getting Started
 
-Create a new PocketBase server (locally or remotely) and create a `.env` file at the top of the project with two keys:
+Create a new [PocketBase](https://pocketbase.io) server (locally or remotely) and create a `.env` file at the top of the project with two keys:
 
 ```
 VITE_POCKETBASE_ADMIN_USERNAME=
