@@ -11,8 +11,8 @@ Learn more about WebRTC [here](https://youtu.be/WmR9IMUD_CY).
 Create a new [PocketBase](https://pocketbase.io) server (locally or remotely) and create a `.env` file at the top of the project with two keys:
 
 ```
-VITE_POCKETBASE_ADMIN_USERNAME=
-VITE_POCKETBASE_ADMIN_PASSWORD=
+VITE_POCKETBASE_USERNAME=
+VITE_POCKETBASE_PASSWORD=
 ```
 
 Add the username and password for the admin client (in a real app you will want to authenticate the user instead).

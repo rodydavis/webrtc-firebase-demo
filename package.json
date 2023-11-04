@@ -1,5 +1,5 @@
 {
-  "name": "webrtc-demo",
+  "name": "webrtc-pocketbase-demo",
   "version": "0.0.0",
   "scripts": {
     "dev": "vite",

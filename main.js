@@ -16,10 +16,13 @@ const answerButton = document.getElementById("answerButton");
 const remoteVideo = document.getElementById("remoteVideo");
 const hangupButton = document.getElementById("hangupButton");
 
-await pb.admins.authWithPassword(
-  import.meta.env.VITE_POCKETBASE_ADMIN_USERNAME,
-  import.meta.env.VITE_POCKETBASE_ADMIN_PASSWORD
-);
+const auth = await pb
+  .collection("users")
+  .authWithPassword(
+    import.meta.env.VITE_POCKETBASE_USERNAME,
+    import.meta.env.VITE_POCKETBASE_PASSWORD
+  );
+const userId = auth.record.id;
 const iceServers = await pb.collection("ice_servers").getFullList();
 
 const servers = {
@@ -58,7 +61,9 @@ webcamButton.onclick = async () => {
 };
 
 callButton.onclick = async () => {
-  const call = await calls.create({});
+  const call = await calls.create({
+    user_id: userId,
+  });
   const callId = call.id;
 
   callInput.value = callId;
