@@ -16,142 +16,144 @@ const answerButton = document.getElementById("answerButton");
 const remoteVideo = document.getElementById("remoteVideo");
 const hangupButton = document.getElementById("hangupButton");
 
-const auth = await pb
-  .collection("users")
-  .authWithPassword(
-    import.meta.env.VITE_POCKETBASE_USERNAME,
-    import.meta.env.VITE_POCKETBASE_PASSWORD
-  );
-const userId = auth.record.id;
-const iceServers = await pb.collection("ice_servers").getFullList();
+(async function () {
+  const auth = await pb
+    .collection("users")
+    .authWithPassword(
+      import.meta.env.VITE_POCKETBASE_USERNAME,
+      import.meta.env.VITE_POCKETBASE_PASSWORD
+    );
+  const userId = auth.record.id;
+  const iceServers = await pb.collection("ice_servers").getFullList();
 
-const servers = {
-  iceServers: [{ urls: iceServers.map((e) => e.url) }],
-  iceCandidatePoolSize: 10,
-};
+  const servers = {
+    iceServers: [{ urls: iceServers.map((e) => e.url) }],
+    iceCandidatePoolSize: 10,
+  };
 
-const pc = new RTCPeerConnection(servers);
-let localStream = null;
-let remoteStream = null;
+  const pc = new RTCPeerConnection(servers);
+  let localStream = null;
+  let remoteStream = null;
 
-webcamButton.onclick = async () => {
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true,
-  });
-  remoteStream = new MediaStream();
+  webcamButton.onclick = async () => {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
+    remoteStream = new MediaStream();
 
-  localStream.getTracks().forEach((track) => {
-    pc.addTrack(track, localStream);
-  });
+    localStream.getTracks().forEach((track) => {
+      pc.addTrack(track, localStream);
+    });
 
-  pc.ontrack = (event) => {
-    const stream = event.streams[0];
-    stream.getTracks().forEach((track) => {
-      remoteStream.addTrack(track);
+    pc.ontrack = (event) => {
+      const stream = event.streams[0];
+      stream.getTracks().forEach((track) => {
+        remoteStream.addTrack(track);
+      });
+    };
+
+    webcamVideo.srcObject = localStream;
+    remoteVideo.srcObject = remoteStream;
+
+    callButton.disabled = false;
+    answerButton.disabled = false;
+    webcamButton.disabled = true;
+  };
+
+  callButton.onclick = async () => {
+    const call = await calls.create({
+      user_id: userId,
+    });
+    const callId = call.id;
+
+    callInput.value = callId;
+
+    pc.onicecandidate = (event) => {
+      event.candidate &&
+        offerCandidates.create({
+          call_id: callId,
+          data: event.candidate.toJSON(),
+        });
+    };
+
+    const offerDescription = await pc.createOffer();
+    await pc.setLocalDescription(offerDescription);
+
+    const offer = {
+      sdp: offerDescription.sdp,
+      type: offerDescription.type,
+    };
+
+    await calls.update(callId, { offer });
+
+    calls.subscribe(callId, (e) => {
+      const data = e.record;
+      if (!pc.currentRemoteDescription && data?.answer) {
+        const answerDescription = new RTCSessionDescription(data.answer);
+        pc.setRemoteDescription(answerDescription);
+      }
+    });
+
+    answerCandidates.subscribe("*", (e) => {
+      if (e.action === "create") {
+        if (e.record?.call_id === callId) {
+          const data = e.record.data;
+          const candidate = new RTCIceCandidate(data);
+          pc.addIceCandidate(candidate);
+        }
+      }
+    });
+
+    hangupButton.disabled = false;
+  };
+
+  answerButton.onclick = async () => {
+    const callId = callInput.value;
+    const call = await calls.getOne(callId);
+
+    pc.onicecandidate = (event) => {
+      event.candidate &&
+        answerCandidates.create({
+          call_id: call.id,
+          data: event.candidate.toJSON(),
+        });
+    };
+
+    const offerDescription = call.offer;
+    const remoteDescription = new RTCSessionDescription(offerDescription);
+    await pc.setRemoteDescription(remoteDescription);
+
+    const answerDescription = await pc.createAnswer();
+    await pc.setLocalDescription(answerDescription);
+
+    const answer = {
+      type: answerDescription.type,
+      sdp: answerDescription.sdp,
+    };
+
+    await calls.update(call.id, { answer });
+
+    offerCandidates.subscribe("*", async (e) => {
+      if (e.record?.call_id === call.id) {
+        if (e.action === "create") {
+          const data = e.record.data;
+          const candidate = new RTCIceCandidate(data);
+          await pc.addIceCandidate(candidate);
+        } else if (e.action === "delete") {
+          await offerCandidates.unsubscribe();
+          window.location.reload();
+        }
+      }
     });
   };
 
-  webcamVideo.srcObject = localStream;
-  remoteVideo.srcObject = remoteStream;
-
-  callButton.disabled = false;
-  answerButton.disabled = false;
-  webcamButton.disabled = true;
-};
-
-callButton.onclick = async () => {
-  const call = await calls.create({
-    user_id: userId,
-  });
-  const callId = call.id;
-
-  callInput.value = callId;
-
-  pc.onicecandidate = (event) => {
-    event.candidate &&
-      offerCandidates.create({
-        call_id: callId,
-        data: event.candidate.toJSON(),
-      });
+  hangupButton.onclick = async () => {
+    const callId = callInput.value;
+    pc.close();
+    await calls.unsubscribe(callId);
+    await calls.delete(callId);
+    await answerCandidates.unsubscribe();
+    window.location.reload();
   };
-
-  const offerDescription = await pc.createOffer();
-  await pc.setLocalDescription(offerDescription);
-
-  const offer = {
-    sdp: offerDescription.sdp,
-    type: offerDescription.type,
-  };
-
-  await calls.update(callId, { offer });
-
-  calls.subscribe(callId, (e) => {
-    const data = e.record;
-    if (!pc.currentRemoteDescription && data?.answer) {
-      const answerDescription = new RTCSessionDescription(data.answer);
-      pc.setRemoteDescription(answerDescription);
-    }
-  });
-
-  answerCandidates.subscribe("*", (e) => {
-    if (e.action === "create") {
-      if (e.record?.call_id === callId) {
-        const data = e.record.data;
-        const candidate = new RTCIceCandidate(data);
-        pc.addIceCandidate(candidate);
-      }
-    }
-  });
-
-  hangupButton.disabled = false;
-};
-
-answerButton.onclick = async () => {
-  const callId = callInput.value;
-  const call = await calls.getOne(callId);
-
-  pc.onicecandidate = (event) => {
-    event.candidate &&
-      answerCandidates.create({
-        call_id: call.id,
-        data: event.candidate.toJSON(),
-      });
-  };
-
-  const offerDescription = call.offer;
-  const remoteDescription = new RTCSessionDescription(offerDescription);
-  await pc.setRemoteDescription(remoteDescription);
-
-  const answerDescription = await pc.createAnswer();
-  await pc.setLocalDescription(answerDescription);
-
-  const answer = {
-    type: answerDescription.type,
-    sdp: answerDescription.sdp,
-  };
-
-  await calls.update(call.id, { answer });
-
-  offerCandidates.subscribe("*", async (e) => {
-    if (e.record?.call_id === call.id) {
-      if (e.action === "create") {
-        const data = e.record.data;
-        const candidate = new RTCIceCandidate(data);
-        await pc.addIceCandidate(candidate);
-      } else if (e.action === "delete") {
-        await offerCandidates.unsubscribe();
-        window.location.reload();
-      }
-    }
-  });
-};
-
-hangupButton.onclick = async () => {
-  const callId = callInput.value;
-  pc.close();
-  await calls.unsubscribe(callId);
-  await calls.delete(callId);
-  await answerCandidates.unsubscribe();
-  window.location.reload();
-};
+})();

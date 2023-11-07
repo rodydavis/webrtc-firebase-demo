@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build --outDir .pb/pb_public",
     "serve": "vite preview"
   },
   "devDependencies": {
