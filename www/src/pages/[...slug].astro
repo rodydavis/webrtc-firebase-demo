@@ -1,0 +1,10 @@
+---
+import Root from "../layouts/Root.astro";
+const { slug } = Astro.params;
+
+const greeting = `Hello, ${slug}!`;
+---
+
+<Root title="Details">
+  <h1>{greeting}</h1>
+</Root>
